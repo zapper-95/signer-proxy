@@ -67,7 +67,7 @@ Starts an AWS KMS-based proxy server that listens for `eth_signTransaction` requ
 signer-proxy aws-kms serve
 ```
 
-Configuration is managed through env vars or shared `.aws/config` and `.aws/credentials` files:
+Configuration is managed through shared `.aws/config` and `.aws/credentials` files or environment variables:
 
 ```bash
 export AWS_ACCESS_KEY_ID=
