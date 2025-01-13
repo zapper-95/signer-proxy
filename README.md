@@ -12,6 +12,13 @@ cargo install --path . --no-default-features
 signer-proxy -h
 ```
 
+Currently, the signer-proxy supports two signers: YubiHSM2 and AWS KMS.
+
+```bash
+signer-proxy yubihsm -h
+signer-proxy aws-kms -h
+```
+
 ## YubiHSM2
 
 ### Global options for `generate-key` and `serve` subcommands
