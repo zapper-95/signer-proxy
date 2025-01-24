@@ -82,6 +82,83 @@ export AWS_SECRET_ACCESS_KEY=
 export AWS_REGION=
 ```
 
+## Authentication and Firewall  
+
+`signer-proxy` does not include built-in basic authentication. For enhanced security, we recommend securing `signer-proxy` behind a firewall or using a reverse proxy, such as [NGINX](https://nginx.org) or [Traefik](https://traefik.io). This setup allows you to implement basic authentication and optionally add a TLS certificate for an extra layer of protection.  
+
+## Using `signer-proxy` with the OP Stack  
+
+To secure the private keys used by [OP Stack Privileged Roles](https://docs.optimism.io/chain/security/privileged-roles) with `signer-proxy`, you **must remove all private keys from environment variables and arguments** passed to any OP Stack services, except for `op-node` (e.g., `op-batcher`, `op-proposer`, `op-challenger`, etc.). Instead, configure the signer address and endpoint as environment variables or arguments as shown below:  
+
+### Environment Variables  
+
+Define the signer address and endpoint for each OP Stack service:  
+
+```  
+# op-batcher  
+OP_BATCHER_SIGNER_ADDRESS=0x...  
+OP_BATCHER_SIGNER_ENDPOINT=http://127.0.0.1:4000/key/...  
+
+# op-proposer  
+OP_PROPOSER_SIGNER_ADDRESS=0x...  
+OP_PROPOSER_SIGNER_ENDPOINT=http://127.0.0.1:4000/key/...  
+
+# op-challenger  
+OP_CHALLENGER_SIGNER_ADDRESS=0x...  
+OP_CHALLENGER_SIGNER_ENDPOINT=http://127.0.0.1:4000/key/...  
+
+# For other services, replace [SERVICE] with the service name:  
+OP_[SERVICE]_SIGNER_ADDRESS=0x...  
+OP_[SERVICE]_SIGNER_ENDPOINT=http://127.0.0.1:4000/key/...  
+```  
+
+### Command-Line Arguments  
+
+Alternatively, you can pass the same command-line arguments for every service:  
+
+```  
+--signer.address=0x...  
+--signer.endpoint=http://127.0.0.1:4000/key/...  
+```  
+
+### Adding an Authentication Header  
+
+If your reverse proxy enforces authentication headers, include them in your configuration using the following options:  
+
+**Environment Variables:**  
+
+```  
+OP_[SERVICE]_SIGNER_HEADER=Authorization=Bearer 123abc  
+```  
+Replace `[SERVICE]` with each service name.  
+
+**Command-Line Arguments:**  
+
+```  
+--signer.header="Authorization=Bearer 123abc"  
+```  
+
+### Using TLS  
+
+If `signer-proxy` is hosted with TLS for added security, and you're not using the default certificate paths (`tls/ca.crt`, `tls/tls.crt`, `tls/tls.key`), you can specify custom paths using these options:  
+
+**Environment Variables:**  
+
+```  
+OP_[SERVICE]_SIGNER_TLS_CA=tls/ca.crt  
+OP_[SERVICE]_SIGNER_TLS_CERT=tls/tls.crt  
+OP_[SERVICE]_SIGNER_TLS_KEY=tls/tls.key  
+```
+Replace `[SERVICE]` with each service name.  
+
+**Command-Line Arguments:**  
+
+```  
+--signer.tls.ca=tls/ca.crt  
+--signer.tls.cert=tls/tls.crt  
+--signer.tls.key=tls/tls.key  
+```  
+
 ## Tests
 
 Start [anvil](https://github.com/foundry-rs/foundry/tree/master/crates/anvil) and the proxy server, and then:
