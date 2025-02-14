@@ -101,7 +101,7 @@ signer-proxy aws-kms serve
 | Method | Endpoint | Description | Parameters | Body |
 | ---  | --- | --- | --- | --- | 
 | `GET` |    `/ping` | Tests that the server is running | - | - |
-| `POST` | `/key/{key_id}` | Signs a proposed transaction and returns it RLP encoded | `key_id` (string) - key identifier of your Amazon KMS key | ```json{"id": 1,"jsonrpc": "2.0","method": "eth_signTransaction","params": [{"chainId": "{chain_id}","data": "0x","from": "{from_address}","gas": "{gas}","gasPrice": "{gas_price}","nonce": "{nonce}","to": "{to_address}","value": "{value_to_send}"}]}```
+| `POST` | `/key/{key_id}` | Signs a proposed transaction and returns it RLP encoded | `key_id` (string) - key identifier of your Amazon KMS key | `{"id": 1,"jsonrpc": "2.0","method": "eth_signTransaction","params": [{"chainId": "{chain_id}","data": "0x","from": "{from_address}","gas": "{gas}","gasPrice": "{gas_price}","nonce": "{nonce}","to": "{to_address}","value": "{value_to_send}"}]}`
 | `GET` | `/key/{key_id}/address` | Returns the wallet address of your KMS key | `key_id` (string) - key identifier of your Amazon KMS key | - | 
 
 
