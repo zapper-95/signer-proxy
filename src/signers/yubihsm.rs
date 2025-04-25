@@ -1,21 +1,20 @@
-use crate::app_types::{AppJson, AppResult};
-use crate::jsonrpc::{AddressResponse, JsonRpcReply, JsonRpcRequest};
+use anyhow::{anyhow, Result as AnyhowResult};
 use crate::shutdown_signal::shutdown_signal;
-use crate::signers::common::handle_eth_sign_jsonrpc;
 #[cfg(debug_assertions)]
 use crate::signers::mock::{add_mock_signers, MOCK_KEYS};
 use alloy::{
     network::EthereumWallet,
-    primitives::Address,
-    signers::local::{
+    signers::{
+        Signer,
+        local::{
         yubihsm::{
             asymmetric::Algorithm::EcK256, device::SerialNumber, Capability, Client, Connector,
             Credentials, Domain, HttpConfig, UsbConfig,
         },
         YubiSigner,
+        },
     },
 };
-use anyhow::Result as AnyhowResult;
 use axum::routing::get;
 use axum::{
     debug_handler,
@@ -33,6 +32,15 @@ use tokio::sync::Mutex;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
+use crate::{
+    app_types::{AppError, AppJson, AppResult},
+    jsonrpc::{JsonRpcReply, JsonRpcRequest, JsonRpcResult, AddressResponse},
+    signers::common::{handle_eth_sign_transaction, handle_health_status, to_signing_hash, BlockPayloadArgs},
+
+};
+use alloy::primitives::{Address};
+use::alloy::hex;
+
 
 const DEFAULT_USB_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_HTTP_TIMEOUT_MS: u64 = 5000;
@@ -46,6 +54,8 @@ pub enum YubiMode {
     #[cfg(debug_assertions)]
     Mock,
 }
+
+
 
 #[derive(StructOpt)]
 pub struct YubiOpt {
@@ -103,8 +113,10 @@ pub enum YubiCommand {
 pub struct AppState {
     pub connector: Connector,
     pub credentials: Credentials,
-    pub signers: Arc<Mutex<HashMap<u16, EthereumWallet>>>,
+    pub signers: Arc<Mutex<HashMap<u16, Arc<YubiSigner>>>>,
 }
+
+
 
 #[debug_handler]
 async fn handle_ping() -> &'static str {
@@ -122,20 +134,22 @@ async fn handle_request(
     handle_eth_sign_jsonrpc(payload, eth_signer).await
 }
 
-async fn get_signer(state: Arc<AppState>, key_id: u16) -> AnyhowResult<EthereumWallet> {
+async fn get_signer(state: Arc<AppState>, key_id: u16) -> AnyhowResult<Arc<YubiSigner>> {
     let mut signers = state.signers.lock().await;
 
     if let Some(signer) = signers.get(&key_id) {
         return Ok(signer.clone());
     }
 
-    let yubi_signer =
-        YubiSigner::connect(state.connector.clone(), state.credentials.clone(), key_id)?;
-    let eth_signer = EthereumWallet::from(yubi_signer);
-
-    signers.insert(key_id, eth_signer.clone());
-
-    Ok(eth_signer)
+    let yubi_signer = Arc::new(
+        YubiSigner::connect(
+            state.connector.clone(),
+            state.credentials.clone(),
+            key_id,
+        )?
+    );    
+    signers.insert(key_id, yubi_signer.clone());
+    Ok(yubi_signer)
 }
 
 #[debug_handler]
@@ -144,7 +158,7 @@ async fn handle_address_request(
     State(state): State<Arc<AppState>>,
 ) -> AppResult<AddressResponse> {
     let eth_signer = get_signer(state.clone(), key_id).await?;
-    let address = eth_signer.default_signer().address().to_string();
+    let address = eth_signer.address().to_string();
 
     Ok(AppJson(AddressResponse { address }))
 }
@@ -259,3 +273,56 @@ pub async fn handle_yubihsm(opt: YubiOpt) {
         }
     }
 }
+
+pub async fn handle_eth_sign_jsonrpc(
+    payload: JsonRpcRequest<Vec<Value>>,
+    signer: Arc<YubiSigner>,
+) -> AppResult<JsonRpcReply<Value>> {
+    let method = payload.method.as_str();
+
+    let result = match method {
+        "eth_signTransaction" => handle_eth_sign_transaction(payload, EthereumWallet::from(signer)).await,
+        "health_status" => handle_health_status(payload).await,
+        "opsigner_signBlockPayload" => handle_eth_sign_block(payload, signer).await,
+        _ => Err(anyhow!(
+            "method not supported (only eth_signTransaction and health_status): {}",
+            method
+        )),
+    };
+
+    result.map(AppJson).map_err(AppError)
+}
+
+
+pub async fn handle_eth_sign_block(
+    payload: JsonRpcRequest<Vec<Value>>,
+    signer: Arc<YubiSigner>,
+) -> AnyhowResult<JsonRpcReply<Value>> {
+
+    let params = payload.params.ok_or_else(|| anyhow!("params is empty"))?;
+    if params.is_empty() {
+        return Err(anyhow!("params is empty"));
+    }
+
+    let block_object = params[0].clone();
+    let block: BlockPayloadArgs = serde_json::from_value(block_object)?;
+
+    let signing_hash = to_signing_hash(&block);
+
+    let signed_hash  = signer.sign_hash(&signing_hash).await?;
+
+    // extract the 65-byte array
+    let sig_bytes: [u8; 65] = signed_hash.as_bytes();
+
+    // encode as a "0x"-prefixed hex string
+    let signed_hash_hex = hex::encode_prefixed(&sig_bytes[..]);
+    
+    // Build JSON-RPC reply
+    // let result = Value::String(sig_hex);
+    Ok(JsonRpcReply {
+        id: payload.id,
+        jsonrpc: payload.jsonrpc,
+        result: JsonRpcResult::Result(Value::String(signed_hash_hex)),
+    })
+}
+
