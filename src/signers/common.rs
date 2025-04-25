@@ -3,15 +3,33 @@ use alloy::{
     hex,
     network::{EthereumWallet, TransactionBuilder},
     rpc::types::TransactionRequest,
+    primitives::{U256, B256, keccak256, Address},
 };
 
 use anyhow::{anyhow, Result as AnyhowResult};
 use serde_json::Value;
 
 use crate::{
-    app_types::{AppError, AppJson, AppResult},
     jsonrpc::{JsonRpcReply, JsonRpcRequest, JsonRpcResult},
 };
+
+use serde::{Deserialize};
+use serde_with::{serde_as};
+use serde_with::base64::{Base64};
+
+#[serde_as]
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockPayloadArgs {
+    pub domain: [u8; 32],
+    pub chain_id: U256,         // U256 is 32 bytes, matches big.Int
+
+    #[serde_as(as = "Base64")]
+    pub payload_hash: Vec<u8>,
+    
+    pub sender_address: Address,
+    }
+
 
 pub async fn handle_eth_sign_transaction(
     payload: JsonRpcRequest<Vec<Value>>,
@@ -49,20 +67,24 @@ pub async fn handle_health_status(
     })
 }
 
-pub async fn handle_eth_sign_jsonrpc(
-    payload: JsonRpcRequest<Vec<Value>>,
-    signer: EthereumWallet,
-) -> AppResult<JsonRpcReply<Value>> {
-    let method = payload.method.as_str();
 
-    let result = match method {
-        "eth_signTransaction" => handle_eth_sign_transaction(payload, signer).await,
-        "health_status" => handle_health_status(payload).await,
-        _ => Err(anyhow!(
-            "method not supported (only eth_signTransaction and health_status): {}",
-            method
-        )),
-    };
 
-    result.map(AppJson).map_err(AppError)
+pub fn to_signing_hash(args: &BlockPayloadArgs) -> B256 {
+    let mut msg_input = [0u8; 96];
+    msg_input[0..32].copy_from_slice(&args.domain);
+
+    // Convert U256 → B256 (i.e. big-endian bytes) then grab the inner [u8;32]
+    let chain_id_bytes: [u8; 32] = B256::from(args.chain_id).0; 
+    msg_input[32..64].copy_from_slice(&chain_id_bytes);  //  [oai_citation_attribution:0‡Docs.rs](https://docs.rs/alloy-primitives/latest/alloy_primitives/aliases/type.B256.html)
+
+    let payload_hash_bytes: [u8; 32] = args
+    .payload_hash
+    .as_slice()                    // &[u8]
+    .try_into()                   // &[u8] → [u8;32], copied
+    .unwrap();
+
+    println!("payload_hash_bytes: {:?}", payload_hash_bytes);
+    msg_input[64..96].copy_from_slice(&payload_hash_bytes);
+
+    keccak256(msg_input)
 }
