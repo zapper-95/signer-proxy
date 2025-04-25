@@ -1,9 +1,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use alloy::network::EthereumWallet;
-use alloy::primitives::Address;
+use anyhow::{anyhow, Result as AnyhowResult};
 use alloy::signers::{aws::AwsSigner, Signer};
-use anyhow::Result as AnyhowResult;
 use aws_config::BehaviorVersion;
 use aws_sdk_kms::Client;
 use axum::http::StatusCode;
@@ -24,11 +23,14 @@ use tracing::info;
 
 use crate::jsonrpc::AddressResponse;
 use crate::{
-    app_types::{AppJson, AppResult},
-    jsonrpc::{JsonRpcReply, JsonRpcRequest},
+    app_types::{AppError, AppJson, AppResult},
+    jsonrpc::{JsonRpcReply, JsonRpcRequest, JsonRpcResult},
     shutdown_signal::shutdown_signal,
-    signers::common::handle_eth_sign_jsonrpc,
+    signers::common::{handle_eth_sign_transaction, handle_health_status, to_signing_hash, BlockPayloadArgs},
 };
+use::alloy::hex;
+use alloy::primitives::{Address};
+
 
 #[derive(StructOpt)]
 pub struct AwsOpt {
@@ -44,7 +46,7 @@ pub enum AwsCommand {
 #[derive(Clone)]
 struct AppState {
     client: Client,
-    signers: Arc<Mutex<HashMap<String, EthereumWallet>>>,
+    signers: Arc<Mutex<HashMap<String, AwsSigner>>>,
 }
 
 const API_TIMEOUT_SECS: u64 = 30;
@@ -60,11 +62,11 @@ async fn handle_request(
     State(state): State<Arc<AppState>>,
     AppJson(payload): AppJson<JsonRpcRequest<Vec<Value>>>,
 ) -> AppResult<JsonRpcReply<Value>> {
-    let eth_signer = get_signer(state.clone(), key_id).await?;
-    handle_eth_sign_jsonrpc(payload, eth_signer).await
+    let signer = get_signer(state.clone(), key_id).await?;
+    handle_eth_sign_jsonrpc(payload, signer).await
 }
 
-async fn get_signer(state: Arc<AppState>, key_id: String) -> AnyhowResult<EthereumWallet> {
+async fn get_signer(state: Arc<AppState>, key_id: String) -> AnyhowResult<AwsSigner> {
     let mut signers = state.signers.lock().await;
 
     if let Some(signer) = signers.get(&key_id) {
@@ -72,11 +74,8 @@ async fn get_signer(state: Arc<AppState>, key_id: String) -> AnyhowResult<Ethere
     }
 
     let signer = AwsSigner::new(state.client.clone(), key_id.clone(), None).await?;
-    let eth_signer = EthereumWallet::from(signer);
-
-    signers.insert(key_id.clone(), eth_signer.clone());
-
-    Ok(eth_signer)
+    signers.insert(key_id.clone(), signer.clone());
+    Ok(signer)
 }
 
 #[debug_handler]
@@ -131,3 +130,65 @@ pub async fn handle_aws_kms(opt: AwsOpt) {
         }
     }
 }
+
+
+pub async fn handle_eth_sign_jsonrpc(
+    payload: JsonRpcRequest<Vec<Value>>,
+    signer: AwsSigner,
+) -> AppResult<JsonRpcReply<Value>> {
+    let method = payload.method.as_str();
+
+    let result = match method {
+        "eth_signTransaction" => handle_eth_sign_transaction(payload, EthereumWallet::from(signer)).await,
+        "health_status" => handle_health_status(payload).await,
+        "opsigner_signBlockPayload" => handle_eth_sign_block(payload, signer).await,
+        _ => Err(anyhow!(
+            "method not supported (only eth_signTransaction and health_status): {}",
+            method
+        )),
+    };
+
+    result.map(AppJson).map_err(AppError)
+}
+
+
+
+
+pub async fn handle_eth_sign_block(
+    payload: JsonRpcRequest<Vec<Value>>,
+    signer: AwsSigner,
+) -> AnyhowResult<JsonRpcReply<Value>> {
+
+    println!("handle_eth_sign_block payload: {:?}", payload);
+    let params = payload.params.ok_or_else(|| anyhow!("params is empty"))?;
+    if params.is_empty() {
+        return Err(anyhow!("params is empty"));
+    }
+
+    let block_object = params[0].clone();
+    let block: BlockPayloadArgs = serde_json::from_value(block_object)?;
+
+    let signing_hash = to_signing_hash(&block);
+
+    let signed_hash  = signer.sign_hash(&signing_hash).await?;
+
+    // extract the 65-byte array
+    let sig_bytes: [u8; 65] = signed_hash.as_bytes();
+
+    // encode as a "0x"-prefixed hex string
+    let signed_hash_hex = hex::encode_prefixed(&sig_bytes[..]);
+    
+    // Build JSON-RPC reply
+    // let result = Value::String(sig_hex);
+    Ok(JsonRpcReply {
+        id: payload.id,
+        jsonrpc: payload.jsonrpc,
+        result: JsonRpcResult::Result(Value::String(signed_hash_hex)),
+    })
+}
+
+
+
+
+
+
