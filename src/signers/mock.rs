@@ -1,6 +1,6 @@
 use crate::signers::yubihsm::AppState;
 use alloy::primitives::hex;
-use alloy::{network::EthereumWallet, signers::local::yubihsm::Domain, signers::local::YubiSigner};
+use alloy::{signers::local::yubihsm::Domain, signers::local::YubiSigner};
 use anyhow::Result as AnyhowResult;
 
 use std::sync::Arc;
@@ -34,17 +34,19 @@ pub async fn add_mock_signers(
     };
 
     for (key_id, private_key, _address) in keys_to_use {
-        let yubi_signer = YubiSigner::from_key(
-            state.connector.clone(),
-            state.credentials.clone(),
-            key_id,
-            "".into(),
-            Domain::all(),
-            private_key,
-        )?;
-        let eth_signer = EthereumWallet::from(yubi_signer);
+        let yubi_signer = 
+        Arc::new(
+            YubiSigner::from_key(
+                state.connector.clone(),
+                state.credentials.clone(),
+                key_id,
+                "".into(),
+                Domain::all(),
+                private_key,
+            )?
+        );
 
-        signers.insert(key_id, eth_signer.clone());
+        signers.insert(key_id, yubi_signer.clone());
     }
 
     Ok(())
