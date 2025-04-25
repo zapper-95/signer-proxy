@@ -3,7 +3,7 @@ use alloy::{
     hex,
     network::{EthereumWallet, TransactionBuilder},
     rpc::types::TransactionRequest,
-    primitives::{U256, Address, B256, keccak256},
+    primitives::{U256, B256, keccak256},
 };
 
 use anyhow::{anyhow, Result as AnyhowResult};
@@ -24,7 +24,6 @@ pub struct BlockPayloadArgs {
 
     #[serde(with = "hex::serde")]
     pub payload_hash: [u8; 32], // 32 bytes
-    pub sender_address: Address, // 20 bytes, handles 0x-prefixed hex
 }
 
 

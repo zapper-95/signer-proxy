@@ -143,7 +143,7 @@ pub async fn handle_eth_sign_jsonrpc(
         "health_status" => handle_health_status(payload).await,
         "opsigner_signBlockPayload" => handle_eth_sign_block(payload, signer).await,
         _ => Err(anyhow!(
-            "method not supported (only eth_signTransaction and health_status): {}",
+            "method not supported (only eth_signTransaction, health_status and opsigner_signBlockPayload): {}",
             method
         )),
     };
@@ -178,8 +178,6 @@ pub async fn handle_eth_sign_block(
     // encode as a "0x"-prefixed hex string
     let signed_hash_hex = hex::encode_prefixed(&sig_bytes[..]);
     
-    // Build JSON-RPC reply
-    // let result = Value::String(sig_hex);
     Ok(JsonRpcReply {
         id: payload.id,
         jsonrpc: payload.jsonrpc,
