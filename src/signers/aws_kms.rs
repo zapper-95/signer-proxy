@@ -168,6 +168,7 @@ pub async fn handle_eth_sign_block(
     let block_object = params[0].clone();
     let block: BlockPayloadArgs = serde_json::from_value(block_object)?;
 
+    println!("block: {:?}", block);
     let signing_hash = to_signing_hash(&block);
 
     let signed_hash  = signer.sign_hash(&signing_hash).await?;

@@ -3,7 +3,7 @@ use alloy::{
     hex,
     network::{EthereumWallet, TransactionBuilder},
     rpc::types::TransactionRequest,
-    primitives::{U256, B256, keccak256},
+    primitives::{U256, B256, keccak256, Address},
 };
 
 use anyhow::{anyhow, Result as AnyhowResult};
@@ -13,18 +13,22 @@ use crate::{
     jsonrpc::{JsonRpcReply, JsonRpcRequest, JsonRpcResult},
 };
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize};
+use serde_with::{serde_as};
+use serde_with::base64::{Base64};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde_as]
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockPayloadArgs {
-
-    #[serde(with = "hex::serde")]
     pub domain: [u8; 32],
     pub chain_id: U256,         // U256 is 32 bytes, matches big.Int
 
-    #[serde(with = "hex::serde")]
-    pub payload_hash: [u8; 32], // 32 bytes
-}
+    #[serde_as(as = "Base64")]
+    pub payload_hash: Vec<u8>,
+    
+    pub sender_address: Address,
+    }
 
 
 pub async fn handle_eth_sign_transaction(
@@ -73,7 +77,14 @@ pub fn to_signing_hash(args: &BlockPayloadArgs) -> B256 {
     let chain_id_bytes: [u8; 32] = B256::from(args.chain_id).0; 
     msg_input[32..64].copy_from_slice(&chain_id_bytes);  //  [oai_citation_attribution:0‡Docs.rs](https://docs.rs/alloy-primitives/latest/alloy_primitives/aliases/type.B256.html)
 
-    msg_input[64..96].copy_from_slice(&args.payload_hash);
+    let payload_hash_bytes: [u8; 32] = args
+    .payload_hash
+    .as_slice()                    // &[u8]
+    .try_into()                   // &[u8] → [u8;32], copied
+    .unwrap();
+
+    println!("payload_hash_bytes: {:?}", payload_hash_bytes);
+    msg_input[64..96].copy_from_slice(&payload_hash_bytes);
 
     keccak256(msg_input)
 }
