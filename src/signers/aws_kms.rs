@@ -174,11 +174,16 @@ pub async fn handle_eth_sign_block(
     let signed_hash  = signer.sign_hash(&signing_hash).await?;
 
     // extract the 65-byte array
-    let sig_bytes: [u8; 65] = signed_hash.as_bytes();
+    let mut sig_bytes: [u8; 65] = signed_hash.as_bytes();
+    if sig_bytes[64] < 27 {
+        return Err(anyhow!("Invalid recovery id: expected value >= 27, got {}", sig_bytes[64]));
+    }
+
+    sig_bytes[64] = sig_bytes[64] - 27; // Adjust the recovery id to be 0 or 1
 
     // encode as a "0x"-prefixed hex string
     let signed_hash_hex = hex::encode_prefixed(&sig_bytes[..]);
-    
+    println!("signed_hash_hex: {:?}", signed_hash_hex);
     Ok(JsonRpcReply {
         id: payload.id,
         jsonrpc: payload.jsonrpc,

@@ -307,18 +307,23 @@ pub async fn handle_eth_sign_block(
     let block_object = params[0].clone();
     let block: BlockPayloadArgs = serde_json::from_value(block_object)?;
 
+    println!("block: {:?}", block);
     let signing_hash = to_signing_hash(&block);
 
     let signed_hash  = signer.sign_hash(&signing_hash).await?;
 
     // extract the 65-byte array
-    let sig_bytes: [u8; 65] = signed_hash.as_bytes();
+    let mut sig_bytes: [u8; 65] = signed_hash.as_bytes();
+    if sig_bytes[64] < 27 {
+        return Err(anyhow!("Invalid recovery id: expected value >= 27, got {}", sig_bytes[64]));
+    }
+
+    sig_bytes[64] = sig_bytes[64] - 27; // Adjust the recovery id to be 0 or 1
 
     // encode as a "0x"-prefixed hex string
     let signed_hash_hex = hex::encode_prefixed(&sig_bytes[..]);
-    
+    println!("signed_hash_hex: {:?}", signed_hash_hex);
     // Build JSON-RPC reply
-    // let result = Value::String(sig_hex);
     Ok(JsonRpcReply {
         id: payload.id,
         jsonrpc: payload.jsonrpc,
