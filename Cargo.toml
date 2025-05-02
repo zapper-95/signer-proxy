@@ -20,6 +20,8 @@ alloy = { git = "https://github.com/upnode-org/alloy", features = [
   "network",
   "signer-yubihsm",
   "signer-aws",
+  "signers",
+  "signer-local",
 ] }
 yubihsm = { version = "0.42.1", features = ["secp256k1", "http", "usb"] }
 anyhow = "1.0.86"
